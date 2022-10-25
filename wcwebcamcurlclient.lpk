@@ -3,12 +3,16 @@
   <Package Version="5">
     <Name Value="wcwebcamcurlclient"/>
     <Type Value="RunAndDesignTime"/>
+    <Author Value="iLya2IK"/>
     <CompilerOptions>
       <Version Value="11"/>
       <SearchPaths>
         <UnitOutputDirectory Value="lib/$(TargetCPU)-$(TargetOS)"/>
       </SearchPaths>
     </CompilerOptions>
+    <Description Value="Abstract client for REST Web Camera Server written with Lazarus (Free Pascal)"/>
+    <License Value="LGPL-2.1 license "/>
+    <Version Major="1"/>
     <Files>
       <Item>
         <Filename Value="wccurlclient.pas"/>
