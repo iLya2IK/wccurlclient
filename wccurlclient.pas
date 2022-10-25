@@ -16,9 +16,9 @@ type
 
   TTaskNotify = procedure (aTask : THTTP2BackgroundTask) of object;
   TOnHTTP2Finish = TTaskNotify;
-  TCURLNotifyEvent = procedure (aObj : TJSONObject) of object;
-  TCURLArrNotifyEvent = procedure (aArr : TJSONArray) of object;
-  TAddLogNotify = procedure (const aStr : String) of object;
+  TCURLNotifyEvent = procedure (aTask : THTTP2BackgroundTask; aObj : TJSONObject) of object;
+  TCURLArrNotifyEvent = procedure (aTask : THTTP2BackgroundTask; aArr : TJSONArray) of object;
+  TStringNotify = procedure (const aStr : String) of object;
   TConnNotifyEvent = procedure (aValue : Boolean) of object;
   TDataNotifyEvent = procedure (aData : TCustomMemoryStream) of object;
 
@@ -287,11 +287,9 @@ type
     FOnSynchroUpdateTask : TTaskNotify;
     FOnSuccessUpdateRecords : TCURLArrNotifyEvent;
     FOnDisconnect : TNotifyEvent;
-    FOnAddLog : TAddLogNotify;
-    FOnAfterLaunchInStream : TNotifyEvent;
-    FOnBeforeLaunchInStream : TNotifyEvent;
-    FOnAfterLaunchOutStream : TNotifyEvent;
-    FOnBeforeLaunchOutStream : TNotifyEvent;
+    FOnAddLog : TStringNotify;
+    FOnAfterLaunchInStream : TTaskNotify;
+    FOnAfterLaunchOutStream : TTaskNotify;
     FOnSuccessUpdateDevices : TCURLArrNotifyEvent;
     FOnSuccessUpdateMsgs : TCURLArrNotifyEvent;
     FOnSuccessSendMsg : TCURLNotifyEvent;
@@ -302,6 +300,7 @@ type
     FOnSuccessGetConfig : TCURLArrNotifyEvent;
     FOnSuccessDeleteRecords : TCURLNotifyEvent;
     FOnSuccessAuth : TCURLNotifyEvent;
+    FOnSIDSetted : TStringNotify;
     LastMsgsStamp, LastRecsStamp : String;
 
     function GetConnected : Boolean;
@@ -315,14 +314,17 @@ type
     procedure SetNeedToUpdateDevices(AValue : Boolean);
     procedure SetNeedToUpdateMsgs(AValue : Boolean);
     procedure SetNeedToUpdateRecords(AValue : Boolean);
-    procedure SetSID(AValue : String);
+    procedure SetSID(const AValue : String);
     procedure SetStreaming(AValue : Boolean);
   public
     constructor Create;
+    procedure Start;
+    procedure TasksProceed; virtual;
     procedure Proceed; virtual;
     procedure Disconnect; virtual;
     destructor Destroy; override;
 
+    procedure Authorize(const aName, aPass : String);
     function LaunchOutStream : Boolean;
     function LaunchInStream(const aDeviceName : String) : Boolean;
     procedure doPost(const aPath, aContent : String;
@@ -335,6 +337,8 @@ type
 
     function ExtractDeviceName(const dev : String) : String;
 
+    procedure GetConfig;
+    procedure SetConfig(const aStr : String);
     procedure UpdateDevices;
     procedure UpdateRecords;
     procedure UpdateMsgs;
@@ -352,7 +356,7 @@ type
     property OnInitCURL : TNotifyEvent read FOnInitCURL write FOnInitCURL;
     property OnConnectedChanged : TConnNotifyEvent read FOnConnected write FOnConnected;
     property OnDisconnect : TNotifyEvent read FOnDisconnect write FOnDisconnect;
-    property OnAddLog : TAddLogNotify read FOnAddLog write FOnAddLog;
+    property OnAddLog : TStringNotify read FOnAddLog write FOnAddLog;
     property OnSuccessAuth : TCURLNotifyEvent read FOnSuccessAuth write FOnSuccessAuth;
     property OnSuccessUpdateDevices : TCURLArrNotifyEvent read FOnSuccessUpdateDevices write FOnSuccessUpdateDevices;
     property OnSuccessUpdateMsgs : TCURLArrNotifyEvent read FOnSuccessUpdateMsgs write FOnSuccessUpdateMsgs;
@@ -362,11 +366,9 @@ type
     property OnSuccessRequestRecord : TDataNotifyEvent read FOnSuccessRequestRecord write FOnSuccessRequestRecord;
     property OnSuccessSaveAsSnapshot : TNotifyEvent read FOnSuccessSaveAsSnapshot write FOnSuccessSaveAsSnapshot;
     property OnSuccessGetConfig : TCURLArrNotifyEvent read FOnSuccessGetConfig write FOnSuccessGetConfig;
-    property OnBeforeLaunchInStream : TNotifyEvent read FOnBeforeLaunchInStream write FOnBeforeLaunchInStream;
-    property OnBeforeLaunchOutStream : TNotifyEvent read FOnBeforeLaunchOutStream write FOnBeforeLaunchOutStream;
-    property OnAfterLaunchInStream : TNotifyEvent read FOnAfterLaunchInStream write FOnAfterLaunchInStream;
-    property OnAfterLaunchOutStream : TNotifyEvent read FOnAfterLaunchOutStream write FOnAfterLaunchOutStream;
-
+    property OnAfterLaunchInStream : TTaskNotify read FOnAfterLaunchInStream write FOnAfterLaunchInStream;
+    property OnAfterLaunchOutStream : TTaskNotify read FOnAfterLaunchOutStream write FOnAfterLaunchOutStream;
+    property OnSIDSetted : TStringNotify read FOnSIDSetted write FOnSIDSetted;
     property OnSynchroUpdateTask : TTaskNotify read FOnSynchroUpdateTask write FOnSynchroUpdateTask;
     property OnSuccessIOStream : TTaskNotify read FOnSuccessIOStream write FOnSuccessIOStream;
 
@@ -375,6 +377,9 @@ type
     property NeedToUpdateDevices : Boolean read GetNeedToUpdateDevices write SetNeedToUpdateDevices;
     property NeedToUpdateRecords : Boolean read GetNeedToUpdateRecords write SetNeedToUpdateRecords;
     property NeedToUpdateMsgs : Boolean read GetNeedToUpdateMsgs write SetNeedToUpdateMsgs;
+
+    property Frame : THTTP2StreamFrame read FFrame;
+    property Setts : THTTP2SettingsIntf read FSetts;
   end;
 
 
@@ -1391,7 +1396,7 @@ begin
         NeedToUpdateRecords := true;
         NeedToUpdateMsgs    := true;
         if Assigned(OnSuccessAuth) then
-          OnSuccessAuth(jObj);
+          OnSuccessAuth(ATask, jObj);
       end;
       FreeAndNil(jObj);
     end;
@@ -1408,7 +1413,7 @@ begin
     jObj := ConsumeResponseToObj(ATask);
 
     if Assigned(OnSuccessDeleteRecords) then
-      OnSuccessDeleteRecords(jObj);
+      OnSuccessDeleteRecords(ATask, jObj);
 
     if Assigned(jObj) then
       FreeAndNil(jObj);
@@ -1430,7 +1435,7 @@ begin
         if jObj.Find(cCONFIG, jArr) then
         begin
           if Assigned(OnSuccessGetConfig) then
-            OnSuccessGetConfig(jArr);
+            OnSuccessGetConfig(ATask, jArr);
         end;
       finally
         jObj.Free;
@@ -1485,7 +1490,7 @@ begin
     if Assigned(jObj) then
     begin
       if Assigned(OnSuccessSendMsg) then
-        OnSuccessSendMsg(jObj);
+        OnSuccessSendMsg(ATask, jObj);
 
       FreeAndNil(jObj);
     end;
@@ -1494,7 +1499,7 @@ begin
 end;
 
 procedure TWCCURLClient.SuccessUpdateDevices(ATask : THTTP2BackgroundTask);
-var i : integer;
+var
   jObj : TJSONObject;
   jArr : TJSONArray;
 begin
@@ -1507,7 +1512,7 @@ begin
       if Assigned(jArr) then
       begin
         if Assigned(OnSuccessUpdateDevices) then
-          OnSuccessUpdateDevices(jArr);
+          OnSuccessUpdateDevices(ATask, jArr);
       end;
       FreeAndNil(jObj);
     end else
@@ -1530,7 +1535,7 @@ begin
       if assigned(jArr) then
       begin
         if Assigned(OnSuccessUpdateMsgs) then
-          OnSuccessUpdateMsgs(jArr);
+          OnSuccessUpdateMsgs(ATask, jArr);
         if jArr.Count > 0 then
         begin
           for i := 0 to jArr.Count-1 do
@@ -1555,7 +1560,6 @@ procedure TWCCURLClient.SuccessUpdateRecords(ATask : THTTP2BackgroundTask);
 var i, n : integer;
   jObj, jEl : TJSONObject;
   jArr : TJSONArray;
-  aStr : String;
 begin
   if ATask.ErrorCode = TASK_NO_ERROR then
   begin
@@ -1566,7 +1570,7 @@ begin
       if assigned(jArr) then
       begin
         if Assigned(OnSuccessUpdateRecords) then
-          OnSuccessUpdateRecords(jArr);
+          OnSuccessUpdateRecords(ATask, jArr);
         for i := 0 to jArr.Count-1 do
         begin
           jEl := TJSONObject(jArr[i]);
@@ -1836,9 +1840,11 @@ begin
   end;
 end;
 
-procedure TWCCURLClient.SetSID(AValue : String);
+procedure TWCCURLClient.SetSID(const AValue : String);
 begin
   FSetts.SID := AValue;
+  if Assigned(OnSIDSetted) then
+    OnSIDSetted(aValue);
 end;
 
 procedure TWCCURLClient.SetStreaming(AValue : Boolean);
@@ -1854,6 +1860,7 @@ end;
 constructor TWCCURLClient.Create;
 begin
   inherited Create;
+  FLog := TThreadStringList.Create;
   FSynchroFinishedTasks := THTTP2BackgroundTasksProto.Create();
   FTaskPool := THTTP2AsyncBackground.Create;
   FUpdates := THTTP2StreamsTasks.Create;
@@ -1872,10 +1879,28 @@ begin
   Disconnect;
 end;
 
-procedure TWCCURLClient.Proceed;
+procedure TWCCURLClient.Start;
+begin
+  FTaskPool.Start;
+end;
+
+procedure TWCCURLClient.TasksProceed;
 begin
   SynchroUpdateTasks;
   SynchroFinishTasks;
+end;
+
+procedure TWCCURLClient.Proceed;
+begin
+  if Connected then
+  begin
+    if NeedToUpdateDevices then
+      UpdateDevices else
+    if NeedToUpdateRecords then
+      UpdateRecords else
+    if NeedToUpdateMsgs then
+      UpdateMsgs;
+  end;
 end;
 
 destructor TWCCURLClient.Destroy;
@@ -1891,7 +1916,26 @@ begin
   FUpdates.ExtractAll;
   FUpdates.Free;
 
+  FLog.Free;
+
   inherited Destroy;
+end;
+
+procedure TWCCURLClient.Authorize(const aName, aPass : String);
+var
+  jObj : TJSONObject;
+  aStr : String;
+begin
+  jObj := TJSONObject.Create([cNAME, aName,
+                              cPASS, aPass,
+                              cDEVICE, Device]);
+  try
+    aStr := jObj.AsJSON;
+  finally
+    jObj.Free;
+  end;
+  Disconnect;
+  doPost('/authorize.json',  aStr, @SuccessAuth, false);
 end;
 
 function TWCCURLClient.LaunchOutStream : Boolean;
@@ -1903,9 +1947,6 @@ begin
   if DoInitMultiPipeling then
   begin
     Result := true;
-
-    if Assigned(OnBeforeLaunchOutStream) then
-      OnBeforeLaunchOutStream(Self);
 
     Tsk := THTTP2BackgroundOutStreamTask.Create(FTaskPool.Tasks, FSetts, True);
     Tsk.OnFinish := @TaskFinished;
@@ -1929,9 +1970,6 @@ begin
   if DoInitMultiPipeling then
   begin
     Result := true;
-
-    if Assigned(OnBeforeLaunchInStream) then
-      OnBeforeLaunchInStream(Self);
 
     Tsk := THTTP2BackgroundInStreamTask.Create(FTaskPool.Tasks, FSetts, True);
     Tsk.OnFinish := @TaskFinished;
@@ -1972,11 +2010,10 @@ end;
 
 procedure TWCCURLClient.AddLog(const STR : String);
 begin
-  if Assigned(OnAddLog) then
-  begin
-    OnAddLog(Str);
-  end;
   FLog.Add('['+DateTimeToStr(Now)+'] '+Str);
+
+  if Assigned(OnAddLog) then
+    OnAddLog(Str);
 end;
 
 function TWCCURLClient.ExtractDeviceName(const dev : String) : String;
@@ -1998,13 +2035,37 @@ begin
     Result := Device;
 end;
 
+procedure TWCCURLClient.GetConfig;
+var
+  jObj : TJSONObject;
+  aStr : String;
+begin
+  jObj := TJSONObject.Create([cSHASH, SID]);
+  try
+    aStr := jObj.AsJSON;
+  finally
+    jObj.Free;
+  end;
+   doPost('/getConfig.json',aStr, @SuccessGetConfig);
+end;
+
+procedure TWCCURLClient.SetConfig(const aStr : String);
+begin
+  doPost('/setConfig.json', aStr, nil);
+end;
+
 procedure TWCCURLClient.Disconnect;
 begin
   FTaskPool.Tasks.Terminate;
-  Connected := false;
-  NeedToUpdateDevices := false;
-  NeedToUpdateRecords := false;
-  NeedToUpdateMsgs    := false;
+  Lock;
+  try
+    FConnected := false;
+    FNeedToUpdateDevices := false;
+    FNeedToUpdateRecords := false;
+    FNeedToUpdateMsgs    := false;
+  finally
+    UnLock;
+  end;
 
   if Assigned(OnDisconnect) then
     OnDisconnect(Self);
