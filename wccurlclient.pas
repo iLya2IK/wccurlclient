@@ -249,6 +249,7 @@ type
     FSynchroFinishedTasks : THTTP2BackgroundTasksProto;
     FTaskPool : THTTP2AsyncBackground;
     FSetts : THTTP2SettingsIntf;
+    FInitialized : Boolean;
 
     FFrame : THTTP2StreamFrame;
     FUpdates : THTTP2StreamsTasks;
@@ -1155,6 +1156,7 @@ begin
       FillChar(FErrorBuffer, CURL_ERROR_SIZE, #0);
 
       AttachToPool;
+      Result := true;
     end else
       DoError(TASK_ERROR_CANT_EASY_CURL);
   end;
@@ -1282,8 +1284,8 @@ begin
   DoForAllEx(@SetMultiPollError, @code);
   Lock;
   try
-    if Assigned(FCURLM) then curl_multi_cleanup(FCURLM);
-    FCURLM := nil;
+    if Assigned(FCURLM) then
+      FreeAndNil(FCURLM);
   finally
     UnLock;
   end;
@@ -1313,8 +1315,8 @@ end;
 
 destructor THTTP2BackgroundTasks.Destroy;
 begin
-  FCURLM.Free;
   inherited Destroy;
+  if Assigned(FCURLM) then FCURLM.Free;
 end;
 
 procedure THTTP2BackgroundTasks.DoIdle;
@@ -1372,9 +1374,11 @@ begin
 
   if Result then
   begin
-    if Assigned(OnInitCURL) then
+    if (not FInitialized) and Assigned(OnInitCURL) then
       OnInitCURL(FTaskPool.Tasks);
-  end;
+
+    FInitialized := true;
+  end else FInitialized := false;
 end;
 
 procedure TWCCURLClient.SuccessAuth(ATask : THTTP2BackgroundTask);
@@ -1543,8 +1547,10 @@ begin
             jEl := TJSONObject(jArr[i]);
             for n := 0 to jEl.Count-1 do
             begin
-              if SameText(cSTAMP, jEl.Names[n]) then
+              if SameText(cSTAMP, jEl.Names[n]) then begin
                 LastMsgsStamp := jEl.Items[n].AsString;
+                break;
+              end;
             end;
           end;
         end;
@@ -1576,8 +1582,10 @@ begin
           jEl := TJSONObject(jArr[i]);
           for n := 0 to jEl.Count-1 do
           begin
-            if SameText(cSTAMP, jEl.Names[n]) then
+            if SameText(cSTAMP, jEl.Names[n]) then begin
               LastRecsStamp := jEl.Items[n].AsString;
+              Break;
+            end;
           end;
         end;
       end;
@@ -1860,6 +1868,7 @@ end;
 constructor TWCCURLClient.Create;
 begin
   inherited Create;
+  FInitialized := false;
   FLog := TThreadStringList.Create;
   FSynchroFinishedTasks := THTTP2BackgroundTasksProto.Create();
   FTaskPool := THTTP2AsyncBackground.Create;
