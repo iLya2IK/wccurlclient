@@ -22,6 +22,9 @@ const STATE_INIT     = 0;
 const WEBCAM_FRAME_START_SEQ : Word = $aaaa;
       WEBCAM_FRAME_HEADER_SIZE  = Sizeof(Word) + Sizeof(Cardinal);
       WEBCAM_FRAME_BUFFER_SIZE  = $200000;
+      METH_GET = 0;
+      METH_POST = 1;
+      METH_UPLOAD = 2;
 
 const cBAD = 'BAD';
 

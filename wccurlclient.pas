@@ -26,17 +26,39 @@ type
 
   THTTP2SettingsIntf = class(TThreadSafeObject)
   private
-    FSID, FHost, FDevice : String;
+    FSID, FHost, FDevice, FMetaData : String;
+    FProxyProtocol, FProxyHost, FProxyPort, FProxyUser, FProxyPwrd : String;
+    FVerifyTSL : Boolean;
     function GetDevice : String;
     function GetHost : String;
+    function GetMetaData : String;
     function GetSID : String;
-    procedure SetDevice(AValue : String);
-    procedure SetHost(AValue : String);
-    procedure SetSID(AValue : String);
+    function GetProxyAddress : String;
+    function GetProxyAuth : String;
+    function GetVerifyTSL : Boolean;
+    procedure SetDevice(const AValue : String);
+    procedure SetHost(const AValue : String);
+    procedure SetMetaData(AValue : String);
+    procedure SetSID(const AValue : String);
+    procedure SetProxyProt(const AValue : String);
+    procedure SetProxyHost(const AValue : String);
+    procedure SetProxyPort(const AValue : String);
+    procedure SetProxyUser(const AValue : String);
+    procedure SetProxyPwrd(const AValue : String);
+    procedure SetVerifyTSL(AValue : Boolean);
   public
+    constructor Create;
+    property VerifyTSL : Boolean read GetVerifyTSL write SetVerifyTSL;
     property SID : String read GetSID write SetSID;
     property Host : String read GetHost write SetHost;
     property Device : String read GetDevice write SetDevice;
+    property MetaData : String read GetMetaData write SetMetaData;
+    property ProxyAddress : String read GetProxyAddress;
+    property ProxyAuth : String read GetProxyAuth;
+    procedure SetProxy(const aValue : String);
+    function HasProxy : Boolean;
+    function HasProxyAuth : Boolean;
+    function HasProxyAuthPwrd : Boolean;
   end;
 
   { THTTP2BackgroundTask }
@@ -65,6 +87,7 @@ type
     procedure AttachToPool;
     procedure DoError(err : Integer); overload;
     procedure DoError(err, subcode : Integer); overload;
+    procedure ConfigCURL(aSz, aFSz : Int64; meth : Byte; isRead, isSeek : Boolean);
   public
     constructor Create(aPool : THTTP2BackgroundTasks; Settings : THTTP2SettingsIntf;
       aIsSilent : Boolean);
@@ -269,6 +292,7 @@ type
     procedure SuccessSendMsg(ATask : THTTP2BackgroundTask); virtual;
     procedure SuccessUpdateDevices(ATask : THTTP2BackgroundTask); virtual;
     procedure SuccessUpdateMsgs(ATask : THTTP2BackgroundTask); virtual;
+    procedure SuccessUpdateStreams(ATask : THTTP2BackgroundTask); virtual;
     procedure SuccessUpdateRecords(ATask : THTTP2BackgroundTask); virtual;
     procedure TaskFinished(ATask : THTTP2BackgroundTask); virtual;
     procedure SynchroFinishTasks; virtual;
@@ -283,6 +307,7 @@ type
     FNeedToUpdateDevices,
     FNeedToUpdateRecords,
     FNeedToUpdateMsgs,
+    FNeedToUpdateStreams,
     FStreaming : Boolean;
     FOnSuccessIOStream : TTaskNotify;
     FOnSynchroUpdateTask : TTaskNotify;
@@ -291,7 +316,7 @@ type
     FOnAddLog : TStringNotify;
     FOnAfterLaunchInStream : TTaskNotify;
     FOnAfterLaunchOutStream : TTaskNotify;
-    FOnSuccessUpdateDevices : TCURLArrNotifyEvent;
+    FOnSuccessUpdateDevices, FOnSuccessUpdateStreams : TCURLArrNotifyEvent;
     FOnSuccessUpdateMsgs : TCURLArrNotifyEvent;
     FOnSuccessSendMsg : TCURLNotifyEvent;
     FOnInitCURL : TNotifyEvent;
@@ -310,13 +335,19 @@ type
     function GetNeedToUpdateDevices : Boolean;
     function GetNeedToUpdateMsgs : Boolean;
     function GetNeedToUpdateRecords : Boolean;
+    function GetNeedToUpdateStreams : Boolean;
+    function GetProxy : String;
     function GetSID : String;
     function GetStreaming : Boolean;
+    function GetVerifyTSL : Boolean;
     procedure SetNeedToUpdateDevices(AValue : Boolean);
     procedure SetNeedToUpdateMsgs(AValue : Boolean);
     procedure SetNeedToUpdateRecords(AValue : Boolean);
+    procedure SetNeedToUpdateStreams(AValue : Boolean);
+    procedure SetProxy(const AValue : String);
     procedure SetSID(const AValue : String);
     procedure SetStreaming(AValue : Boolean);
+    procedure SetVerifyTSL(AValue : Boolean);
   public
     constructor Create;
     procedure Start;
@@ -343,6 +374,7 @@ type
     procedure UpdateDevices;
     procedure UpdateRecords;
     procedure UpdateMsgs;
+    procedure UpdateStreams;
     procedure DeleteRecords(aIndices : TJSONArray);
     procedure SendMsg(aMsg : TJSONObject);
     procedure RequestRecord(rid : integer);
@@ -353,6 +385,7 @@ type
     property SID : String read GetSID write SetSID;
     property Host : String read GetHost;
     property Device : String read GetDevice;
+    property VerifyTSL : Boolean read GetVerifyTSL write SetVerifyTSL;
 
     property OnInitCURL : TNotifyEvent read FOnInitCURL write FOnInitCURL;
     property OnConnectedChanged : TConnNotifyEvent read FOnConnected write FOnConnected;
@@ -360,6 +393,7 @@ type
     property OnAddLog : TStringNotify read FOnAddLog write FOnAddLog;
     property OnSuccessAuth : TCURLNotifyEvent read FOnSuccessAuth write FOnSuccessAuth;
     property OnSuccessUpdateDevices : TCURLArrNotifyEvent read FOnSuccessUpdateDevices write FOnSuccessUpdateDevices;
+    property OnSuccessUpdateStreams : TCURLArrNotifyEvent read FOnSuccessUpdateStreams write FOnSuccessUpdateStreams;
     property OnSuccessUpdateMsgs : TCURLArrNotifyEvent read FOnSuccessUpdateMsgs write FOnSuccessUpdateMsgs;
     property OnSuccessUpdateRecords : TCURLArrNotifyEvent read FOnSuccessUpdateRecords write FOnSuccessUpdateRecords;
     property OnSuccessSendMsg : TCURLNotifyEvent read FOnSuccessSendMsg write FOnSuccessSendMsg;
@@ -378,6 +412,7 @@ type
     property NeedToUpdateDevices : Boolean read GetNeedToUpdateDevices write SetNeedToUpdateDevices;
     property NeedToUpdateRecords : Boolean read GetNeedToUpdateRecords write SetNeedToUpdateRecords;
     property NeedToUpdateMsgs : Boolean read GetNeedToUpdateMsgs write SetNeedToUpdateMsgs;
+    property NeedToUpdateStreams : Boolean read GetNeedToUpdateStreams write SetNeedToUpdateStreams;
 
     property Frame : THTTP2StreamFrame read FFrame;
     property Setts : THTTP2SettingsIntf read FSetts;
@@ -668,21 +703,9 @@ begin
     begin
       FPath := '/output.raw?' +cSHASH+'='+HTTPEncode(FSettings.SID) +
                                             '&'+cDEVICE+'='+HTTPEncode(aDevice);
-      curl_easy_setopt(FCURL, CURLOPT_HTTP_VERSION, CURL_HTTP_VERSION_2_0);
-      curl_easy_setopt(FCURL, CURLOPT_URL, PChar(FSettings.Host + FPath));
-      curl_easy_setopt(FCURL, CURLOPT_SSL_VERIFYPEER, Longint(0));
-      curl_easy_setopt(FCURL, CURLOPT_SSL_VERIFYHOST, Longint(0));
-      curl_easy_setopt(FCURL, CURLOPT_WRITEDATA, Pointer(Self));
-      curl_easy_setopt(FCURL, CURLOPT_WRITEFUNCTION, @WriteFunctionCallback);
-      curl_easy_setopt(FCURL, CURLOPT_TIMEOUT, Longint(-1));
-      curl_easy_setopt(FCURL, CURLOPT_NOSIGNAL, Longint(1));
-      headers := nil;
-      headers := curl_slist_append(headers, Pchar('content-length: ' + inttostr(0)));
-      curl_easy_setopt(FCURL, CURLOPT_HTTPHEADER, headers);
-      curl_easy_setopt(FCURL, CURLOPT_PIPEWAIT, Longint(1));
 
-      curl_easy_setopt(FCURL, CURLOPT_ERRORBUFFER, PChar(FErrorBuffer));
-      FillChar(FErrorBuffer, CURL_ERROR_SIZE, #0);
+      ConfigCURL(0, 0, METH_GET, false, false);
+      curl_easy_setopt(FCURL, CURLOPT_TIMEOUT, Longint(-1));
 
       AttachToPool;
     end else
@@ -861,32 +884,11 @@ begin
       FResponse.Position := 0;
       FResponse.Size := 0;
       FPath := '/input.raw?' +cSHASH+'='+HTTPEncode(FSettings.SID);
-      curl_easy_setopt(FCURL, CURLOPT_HTTP_VERSION, CURL_HTTP_VERSION_2_0);
-      curl_easy_setopt(FCURL, CURLOPT_URL, PChar(FSettings.Host + FPath));
-      curl_easy_setopt(FCURL, CURLOPT_SSL_VERIFYPEER, Longint(0));
-      curl_easy_setopt(FCURL, CURLOPT_SSL_VERIFYHOST, Longint(0));
-      curl_easy_setopt(FCURL, CURLOPT_UPLOAD, Longint(1));
-      curl_easy_setopt(FCURL, CURLOPT_WRITEDATA, Pointer(Self));
-      curl_easy_setopt(FCURL, CURLOPT_WRITEFUNCTION, @WriteFunctionCallback);
-      curl_easy_setopt(FCURL, CURLOPT_SEEKFUNCTION, @SeekFunctionCallback);
-      curl_easy_setopt(FCURL, CURLOPT_SEEKDATA, Pointer(Self));
-      headers := nil;
-      headers := curl_slist_append(headers, Pchar('content-length: ' + inttostr($500000000)));
-      curl_easy_setopt(FCURL, CURLOPT_HTTPHEADER, headers);
-      curl_easy_setopt(FCURL, CURLOPT_PIPEWAIT, Longint(1));
 
-      curl_easy_setopt(FCURL, CURLOPT_READDATA, Pointer(Self));
-      curl_easy_setopt(FCURL, CURLOPT_READFUNCTION,
-         @ReadFunctionCallback);
-      curl_easy_setopt(FCURL, CURLOPT_INFILESIZE_LARGE, -1);
-      curl_easy_setopt(FCURL, CURLOPT_INFILESIZE, -1);
-      curl_easy_setopt(FCURL, CURLOPT_NOSIGNAL, Longint(1));
+      ConfigCURL($500000000, -1, METH_UPLOAD, True, True);
 
       FRequest := TMemoryStream.Create;
       FRequest.Position := 0;
-
-      curl_easy_setopt(FCURL, CURLOPT_ERRORBUFFER, PChar(FErrorBuffer));
-      FillChar(FErrorBuffer, CURL_ERROR_SIZE, #0);
 
       AttachToPool;
     end else
@@ -968,6 +970,16 @@ begin
   end;
 end;
 
+function THTTP2SettingsIntf.GetMetaData : String;
+begin
+  Lock;
+  try
+    Result := FMetaData;
+  finally
+    UnLock;
+  end;
+end;
+
 function THTTP2SettingsIntf.GetSID : String;
 begin
   Lock;
@@ -978,7 +990,41 @@ begin
   end;
 end;
 
-procedure THTTP2SettingsIntf.SetDevice(AValue : String);
+function THTTP2SettingsIntf.GetProxyAddress : String;
+begin
+  Lock;
+  try
+    Result := FProxyProtocol + FProxyHost;
+    if Length(FProxyPort) > 0 then
+       Result := Result + ':' + FProxyPort;
+  finally
+    UnLock;
+  end;
+end;
+
+function THTTP2SettingsIntf.GetProxyAuth : String;
+begin
+  Lock;
+  try
+    Result := FProxyUser;
+    if Length(FProxyPwrd) > 0 then
+       Result := Result + ':' + FProxyPwrd;
+  finally
+    UnLock;
+  end;
+end;
+
+function THTTP2SettingsIntf.GetVerifyTSL : Boolean;
+begin
+  Lock;
+  try
+    Result := FVerifyTSL;
+  finally
+    UnLock;
+  end;
+end;
+
+procedure THTTP2SettingsIntf.SetDevice(const AValue : String);
 begin
   Lock;
   try
@@ -988,7 +1034,7 @@ begin
   end;
 end;
 
-procedure THTTP2SettingsIntf.SetHost(AValue : String);
+procedure THTTP2SettingsIntf.SetHost(const AValue : String);
 begin
   Lock;
   try
@@ -998,11 +1044,220 @@ begin
   end;
 end;
 
-procedure THTTP2SettingsIntf.SetSID(AValue : String);
+procedure THTTP2SettingsIntf.SetMetaData(AValue : String);
+begin
+  Lock;
+  try
+    FMetaData := AValue;
+  finally
+    UnLock;
+  end;
+end;
+
+procedure THTTP2SettingsIntf.SetSID(const AValue : String);
 begin
   Lock;
   try
     FSID := AValue;
+  finally
+    UnLock;
+  end;
+end;
+
+procedure THTTP2SettingsIntf.SetProxyProt(const AValue : String);
+begin
+  Lock;
+  try
+    FProxyProtocol := AValue;
+  finally
+    UnLock;
+  end;
+end;
+
+procedure THTTP2SettingsIntf.SetProxyHost(const AValue : String);
+begin
+  Lock;
+  try
+    FProxyHost := AValue;
+  finally
+    UnLock;
+  end;
+end;
+
+procedure THTTP2SettingsIntf.SetProxyPort(const AValue : String);
+begin
+  Lock;
+  try
+    FProxyPort := AValue;
+  finally
+    UnLock;
+  end;
+end;
+
+procedure THTTP2SettingsIntf.SetProxyUser(const AValue : String);
+begin
+  Lock;
+  try
+    FProxyUser := HTTPEncode(AValue);
+  finally
+    UnLock;
+  end;
+end;
+
+procedure THTTP2SettingsIntf.SetProxyPwrd(const AValue : String);
+begin
+  Lock;
+  try
+    FProxyPwrd := HTTPEncode(AValue);
+  finally
+    UnLock;
+  end;
+end;
+
+procedure THTTP2SettingsIntf.SetVerifyTSL(AValue : Boolean);
+begin
+  Lock;
+  try
+    FVerifyTSL := AValue;
+  finally
+    UnLock;
+  end;
+end;
+
+constructor THTTP2SettingsIntf.Create;
+begin
+  inherited Create;
+  FProxyProtocol := 'http://';
+end;
+
+procedure THTTP2SettingsIntf.SetProxy(const aValue : String);
+var
+  S, SS, R : PChar;
+  Res : PChar;
+  SL : TStringList;
+  UP, address_len : Integer;
+  L : Integer;
+begin
+  Lock;
+  try
+    if Length(AValue) > 0 then
+    begin
+      FProxyPwrd := '';
+      FProxyPort := '';
+      FProxyUser := '';
+      FProxyHost := '';
+      Exit;
+    end;
+
+    S := PChar(@(aValue[1]));
+    SS := S;
+    L := Length(S);
+    Res := GetMem(L+1);
+    try
+      R := Res;
+      UP := 0;
+      SL := TStringList.Create;
+      try
+        while ((SS - S) < L) do
+        begin
+          if (SS^ in [':', '@']) then
+          begin
+            R^ := #0;
+            SL.Add(StrPas(Res));
+            R := Res;
+            if SS^ = '@' then UP := SL.Count;
+          end else
+          begin
+            R^ := SS^;
+            Inc(R);
+          end;
+          Inc(SS);
+        end;
+        if (R > Res) then
+        begin
+          R^ := #0;
+          SL.Add(StrPas(Res));
+        end;
+
+        case UP of
+          1 : begin
+            FProxyUser := SL[0];
+            FProxyPwrd := '';
+          end;
+          2 : begin
+            FProxyUser := SL[0];
+            FProxyPwrd := SL[1];
+          end;
+        else
+          FProxyUser := '';
+          FProxyPwrd := '';
+        end;
+
+        address_len := SL.Count - UP;
+
+        case (address_len) of
+        1 : begin
+                FProxyHost := SL[SL.Count-1];
+                FProxyPort := '';
+            end;
+        2, 3 : begin
+                if (TryStrToInt(SL[SL.Count-1], L)) then
+                begin
+                    FProxyPort := SL[SL.Count-1];
+                    dec(address_len);
+                end else begin
+                    FProxyPort := '';
+                end;
+                if (address_len > 1) then begin
+                    FProxyProtocol := SL[UP] + '://';
+                    FProxyHost := SL[UP+1];
+                    while ((Length(FProxyHost) > 0) and (FProxyHost[1] = '/')) do
+                        Delete(FProxyHost, 1, 1);
+                end else begin
+                    FProxyHost := SL[UP];
+                end;
+            end;
+        else
+            FProxyHost := '';
+            FProxyPort := '';
+        end;
+
+      finally
+        SL.Free;
+      end;
+    finally
+      FreeMem(Res);
+    end;
+  finally
+    UnLock;
+  end;
+end;
+
+function THTTP2SettingsIntf.HasProxy : Boolean;
+begin
+  Lock;
+  try
+    Result := Length(FProxyHost) > 0;
+  finally
+    UnLock;
+  end;
+end;
+
+function THTTP2SettingsIntf.HasProxyAuth : Boolean;
+begin
+  Lock;
+  try
+    Result := Length(FProxyUser) > 0;
+  finally
+    UnLock;
+  end;
+end;
+
+function THTTP2SettingsIntf.HasProxyAuthPwrd : Boolean;
+begin
+  Lock;
+  try
+    Result := Length(FProxyPwrd) > 0;
   finally
     UnLock;
   end;
@@ -1085,6 +1340,58 @@ begin
   State := STATE_FINISHED;
 end;
 
+procedure THTTP2BackgroundTask.ConfigCURL(aSz, aFSz : Int64; meth : Byte;
+  isRead, isSeek : Boolean);
+begin
+  curl_easy_setopt(FCURL, CURLOPT_HTTP_VERSION, CURL_HTTP_VERSION_2_0);
+  curl_easy_setopt(FCURL, CURLOPT_URL, PChar(FSettings.Host + FPath));
+  case meth of
+    METH_POST: curl_easy_setopt(FCURL, CURLOPT_POST, Longint(1));
+    METH_UPLOAD: curl_easy_setopt(FCURL, CURLOPT_UPLOAD, Longint(1));
+  end;
+
+  if not FSettings.VerifyTSL then
+  begin
+    curl_easy_setopt(FCURL, CURLOPT_SSL_VERIFYPEER, Longint(0));
+    curl_easy_setopt(FCURL, CURLOPT_SSL_VERIFYHOST, Longint(0));
+  end;
+
+  if FSettings.HasProxy then
+  begin
+   curl_easy_setopt(FCURL, CURLOPT_PROXY, PChar(FSettings.ProxyAddress));
+    if  FSettings.HasProxyAuth then
+    begin
+      curl_easy_setopt(FCURL, CURLOPT_PROXYAUTH, CURLAUTH_ANYSAFE);
+      if  FSettings.HasProxyAuthPwrd then
+        curl_easy_setopt(FCURL, CURLOPT_PROXYUSERPWD, PChar(FSettings.ProxyAuth)) else
+        curl_easy_setopt(FCURL, CURLOPT_PROXYUSERNAME, PChar(FSettings.ProxyAuth));
+    end;
+  end;
+
+  curl_easy_setopt(FCURL, CURLOPT_WRITEDATA, Pointer(Self));
+  curl_easy_setopt(FCURL, CURLOPT_WRITEFUNCTION, @WriteFunctionCallback);
+  headers := nil;
+  headers := curl_slist_append(headers, Pchar('content-length: ' + inttostr(aSz)));
+  curl_easy_setopt(FCURL, CURLOPT_HTTPHEADER, headers);
+  curl_easy_setopt(FCURL, CURLOPT_PIPEWAIT, Longint(1));
+  curl_easy_setopt(FCURL, CURLOPT_NOSIGNAL, Longint(1));
+
+  if isSeek then begin
+     curl_easy_setopt(FCURL, CURLOPT_SEEKDATA, Pointer(Self));
+     curl_easy_setopt(FCURL, CURLOPT_SEEKFUNCTION,  @SeekFunctionCallback);
+  end;
+
+  if isRead then begin
+     curl_easy_setopt(FCURL, CURLOPT_READDATA, Pointer(Self));
+     curl_easy_setopt(FCURL, CURLOPT_READFUNCTION,  @ReadFunctionCallback);
+     curl_easy_setopt(FCURL, CURLOPT_INFILESIZE, Longint(aFSz));
+     curl_easy_setopt(FCURL, CURLOPT_INFILESIZE_LARGE, Int64(aFSz));
+  end;
+
+  curl_easy_setopt(FCURL, CURLOPT_ERRORBUFFER, PChar(FErrorBuffer));
+  FillChar(FErrorBuffer, CURL_ERROR_SIZE, #0);
+end;
+
 constructor THTTP2BackgroundTask.Create(aPool : THTTP2BackgroundTasks;
   Settings : THTTP2SettingsIntf; aIsSilent : Boolean);
 begin
@@ -1122,19 +1429,7 @@ begin
       FResponse.Position := 0;
       FResponse.Size := 0;
       FPath := aPath;
-      curl_easy_setopt(FCURL, CURLOPT_HTTP_VERSION, CURL_HTTP_VERSION_2_0);
-      curl_easy_setopt(FCURL, CURLOPT_URL, PChar(FSettings.Host + FPath));
-      curl_easy_setopt(FCURL, CURLOPT_POST, Longint(1));
-      curl_easy_setopt(FCURL, CURLOPT_SSL_VERIFYPEER, Longint(0));
-      curl_easy_setopt(FCURL, CURLOPT_SSL_VERIFYHOST, Longint(0));
-      curl_easy_setopt(FCURL, CURLOPT_WRITEDATA, Pointer(Self));
-      curl_easy_setopt(FCURL, CURLOPT_WRITEFUNCTION,
-         @WriteFunctionCallback);
-      headers := nil;
-      headers := curl_slist_append(headers, Pchar('content-length: ' + inttostr(aContentSize)));
-      curl_easy_setopt(FCURL, CURLOPT_HTTPHEADER, headers);
-      curl_easy_setopt(FCURL, CURLOPT_PIPEWAIT, Longint(1));
-      curl_easy_setopt(FCURL, CURLOPT_NOSIGNAL, Longint(1));
+      ConfigCURL(aContentSize, aContentSize, METH_POST, (aContentSize > 0), false);
 
       if (aContentSize > 0) then begin
         if stack then
@@ -1147,13 +1442,7 @@ begin
           FRequest := TExtMemoryStream.Create;
           TExtMemoryStream(FRequest).SetPtr(aContent,  aContentSize);
         end;
-        curl_easy_setopt(FCURL, CURLOPT_READDATA, Pointer(Self));
-        curl_easy_setopt(FCURL, CURLOPT_READFUNCTION,
-           @ReadFunctionCallback);
-        curl_easy_setopt(FCURL, CURLOPT_INFILESIZE, Longint(aContentSize));
       end;
-      curl_easy_setopt(FCURL, CURLOPT_ERRORBUFFER, PChar(FErrorBuffer));
-      FillChar(FErrorBuffer, CURL_ERROR_SIZE, #0);
 
       AttachToPool;
       Result := true;
@@ -1399,6 +1688,7 @@ begin
         NeedToUpdateDevices := true;
         NeedToUpdateRecords := true;
         NeedToUpdateMsgs    := true;
+        NeedToUpdateStreams := true;
         if Assigned(OnSuccessAuth) then
           OnSuccessAuth(ATask, jObj);
       end;
@@ -1558,6 +1848,29 @@ begin
     finally
       jObj.Free;
     end;
+  end else
+    Disconnect;
+end;
+
+procedure TWCCURLClient.SuccessUpdateStreams(ATask : THTTP2BackgroundTask);
+var
+  jObj : TJSONObject;
+  jArr : TJSONArray;
+begin
+  if ATask.ErrorCode = TASK_NO_ERROR then
+  begin
+    jObj := ConsumeResponseToObj(ATask);
+    if Assigned(jObj) then
+    begin
+      jArr := TJSONArray(jObj.Find(cDEVICES));
+      if Assigned(jArr) then
+      begin
+        if Assigned(OnSuccessUpdateStreams) then
+          OnSuccessUpdateStreams(ATask, jArr);
+      end;
+      FreeAndNil(jObj);
+    end else
+      Disconnect;
   end else
     Disconnect;
 end;
@@ -1803,6 +2116,21 @@ begin
   end;
 end;
 
+function TWCCURLClient.GetNeedToUpdateStreams : Boolean;
+begin
+  Lock;
+  try
+    Result := FNeedToUpdateStreams;
+  finally
+    UnLock;
+  end;
+end;
+
+function TWCCURLClient.GetProxy : String;
+begin
+  Result := FSetts.ProxyAddress;
+end;
+
 function TWCCURLClient.GetSID : String;
 begin
   Result := FSetts.SID;
@@ -1816,6 +2144,11 @@ begin
   finally
     UnLock;
   end;
+end;
+
+function TWCCURLClient.GetVerifyTSL : Boolean;
+begin
+  Result := FSetts.VerifyTSL;
 end;
 
 procedure TWCCURLClient.SetNeedToUpdateDevices(AValue : Boolean);
@@ -1848,6 +2181,21 @@ begin
   end;
 end;
 
+procedure TWCCURLClient.SetNeedToUpdateStreams(AValue : Boolean);
+begin
+  Lock;
+  try
+    FNeedToUpdateStreams := AValue;
+  finally
+    UnLock;
+  end;
+end;
+
+procedure TWCCURLClient.SetProxy(const AValue : String);
+begin
+  FSetts.SetProxy(AValue);
+end;
+
 procedure TWCCURLClient.SetSID(const AValue : String);
 begin
   FSetts.SID := AValue;
@@ -1863,6 +2211,11 @@ begin
   finally
     UnLock;
   end;
+end;
+
+procedure TWCCURLClient.SetVerifyTSL(AValue : Boolean);
+begin
+  FSetts.VerifyTSL := AValue;
 end;
 
 constructor TWCCURLClient.Create;
@@ -1884,6 +2237,7 @@ begin
   FConnected := true;
   FNeedToUpdateRecords := false;
   FNeedToUpdateMsgs := false;
+  FNeedToUpdateStreams := false;
   FNeedToUpdateDevices := false;
   Disconnect;
 end;
@@ -1904,11 +2258,13 @@ begin
   if Connected then
   begin
     if NeedToUpdateDevices then
-      UpdateDevices else
+      UpdateDevices;
     if NeedToUpdateRecords then
-      UpdateRecords else
+      UpdateRecords;
     if NeedToUpdateMsgs then
       UpdateMsgs;
+    if NeedToUpdateStreams then
+      UpdateStreams;
   end;
 end;
 
@@ -1939,6 +2295,10 @@ begin
                               cPASS, aPass,
                               cDEVICE, Device]);
   try
+    if Length( Setts.MetaData ) > 0 then
+    begin
+      jObj.Add(cMETA, Setts.MetaData);
+    end;
     aStr := jObj.AsJSON;
   finally
     jObj.Free;
@@ -2072,6 +2432,7 @@ begin
     FNeedToUpdateDevices := false;
     FNeedToUpdateRecords := false;
     FNeedToUpdateMsgs    := false;
+    FNeedToUpdateStreams := false;
   finally
     UnLock;
   end;
@@ -2129,6 +2490,21 @@ begin
     jObj.Free;
   end;
   doPost('/getMsgs.json',aStr,@SuccessUpdateMsgs)
+end;
+
+procedure TWCCURLClient.UpdateStreams;
+var
+  jObj : TJSONObject;
+  aStr : String;
+begin
+  NeedToUpdateStreams := false;
+  jObj := TJSONObject.Create([cSHASH, SID]);
+  try
+    aStr := jObj.AsJSON;
+  finally
+    jObj.Free;
+  end;
+  doPost('/getStreams.json',aStr,@SuccessUpdateStreams)
 end;
 
 procedure TWCCURLClient.DeleteRecords(aIndices : TJSONArray);
