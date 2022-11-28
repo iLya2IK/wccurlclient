@@ -136,6 +136,8 @@ type
     FInc : integer;
     FFrames : TMemSeq;
     FOnGetNextFrame : TOnGetNextFrame;
+    FSubProtocol : String;
+    FDelta : Integer;
   protected
     procedure PopNextFrame;
   public
@@ -143,6 +145,8 @@ type
       aIsSilent : Boolean);
     destructor Destroy; override;
 
+    procedure SetSubProto(const aValue : String);
+    procedure SetDelta(aValue : integer);
     function  Read(ptr: Pointer; size: LongWord; nmemb: LongWord) : LongWord; override;
     procedure LaunchStream(aOnGetNextFrame: TOnGetNextFrame);
     procedure PushFrame(aFrame : TCustomMemoryStream);
@@ -357,7 +361,7 @@ type
     destructor Destroy; override;
 
     procedure Authorize(const aName, aPass : String);
-    function LaunchOutStream : Boolean;
+    function LaunchOutStream(const aSubProto : String; aDelta : integer) : Boolean;
     function LaunchInStream(const aDeviceName : String) : Boolean;
     procedure doPost(const aPath, aContent : String;
       OnSuccess : TOnHTTP2Finish; silent : Boolean = true);
@@ -842,6 +846,16 @@ begin
   inherited Destroy;
 end;
 
+procedure THTTP2BackgroundOutStreamTask.SetSubProto(const aValue : String);
+begin
+  FSubProtocol := aValue;
+end;
+
+procedure THTTP2BackgroundOutStreamTask.SetDelta(aValue : integer);
+begin
+  FDelta := aValue;
+end;
+
 function THTTP2BackgroundOutStreamTask.Read(ptr : Pointer; size : LongWord;
   nmemb : LongWord) : LongWord;
 
@@ -884,6 +898,10 @@ begin
       FResponse.Position := 0;
       FResponse.Size := 0;
       FPath := '/input.raw?' +cSHASH+'='+HTTPEncode(FSettings.SID);
+      if Length(FSubProtocol) > 0 then
+         FPath := FPath + '&' + cSUBPROTO + HTTPEncode(FSubProtocol);
+      if FDelta > 0 then
+         FPath := FPath + '&' + cDELTA + IntToStr(FDelta);
 
       ConfigCURL($500000000, -1, METH_UPLOAD, True, True);
 
@@ -2307,7 +2325,8 @@ begin
   doPost('/authorize.json',  aStr, @SuccessAuth, false);
 end;
 
-function TWCCURLClient.LaunchOutStream : Boolean;
+function TWCCURLClient.LaunchOutStream(const aSubProto : String;
+  aDelta : integer) : Boolean;
 var
   Tsk : THTTP2BackgroundOutStreamTask;
 begin
@@ -2318,6 +2337,8 @@ begin
     Result := true;
 
     Tsk := THTTP2BackgroundOutStreamTask.Create(FTaskPool.Tasks, FSetts, True);
+    Tsk.SetSubProto(aSubProto);
+    Tsk.SetDelta(aDelta);
     Tsk.OnFinish := @TaskFinished;
     Tsk.OnSuccess := @SuccessIOStream;
 

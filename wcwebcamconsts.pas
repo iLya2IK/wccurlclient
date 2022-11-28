@@ -47,6 +47,8 @@ const cBAD = 'BAD';
       cPARAMS    = 'params';
       cCODE      = 'code';
       cCONFIG    = 'config';
+      cSUBPROTO  = 'subproto';
+      cDELTA     = 'delta';
 
 const RESPONSE_ERRORS : Array [0..15] of String = (
                           'NO_ERROR',
