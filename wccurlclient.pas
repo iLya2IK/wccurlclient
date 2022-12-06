@@ -142,11 +142,11 @@ type
     procedure PopNextFrame;
   public
     constructor Create(aPool : THTTP2BackgroundTasks; Settings : THTTP2SettingsIntf;
+      const aSubProto : String;
+      aDelta : integer;
       aIsSilent : Boolean);
     destructor Destroy; override;
 
-    procedure SetSubProto(const aValue : String);
-    procedure SetDelta(aValue : integer);
     function  Read(ptr: Pointer; size: LongWord; nmemb: LongWord) : LongWord; override;
     procedure LaunchStream(aOnGetNextFrame: TOnGetNextFrame);
     procedure PushFrame(aFrame : TCustomMemoryStream);
@@ -167,20 +167,24 @@ type
     FFrameID : Integer;
 
     FFrames : TMemSeq;
+
+    FDevice : String;
     FOnHasNextFrame : TOnHasNextFrame;
   protected
     procedure PushFrame(aStartAt : Int64);
     function TryConsumeFrame(Chunk : Pointer; ChunkSz : Integer) : integer;
   public
     constructor Create(aPool : THTTP2BackgroundTasks; Settings : THTTP2SettingsIntf;
+      const aDevice : String;
       aIsSilent : Boolean);
     destructor Destroy; override;
 
     function Write(ptr: Pointer; size: LongWord; nmemb: LongWord) : LongWord; override;
-    procedure LaunchStream(const aDevice : String; aOnHasNextFrame : TOnHasNextFrame
-      );
+    procedure LaunchStream(aOnHasNextFrame : TOnHasNextFrame);
 
     function PopFrame : TCustomMemoryStream;
+
+    property Device : String read FDevice;
 
     procedure Close; override;
 
@@ -661,9 +665,11 @@ begin
 end;
 
 constructor THTTP2BackgroundInStreamTask.Create(aPool : THTTP2BackgroundTasks;
-  Settings : THTTP2SettingsIntf; aIsSilent : Boolean);
+  Settings : THTTP2SettingsIntf; const aDevice : String; aIsSilent : Boolean);
 begin
   inherited Create(aPool, Settings, aIsSilent);
+
+  FDevice := aDevice;
 
   FreeAndNil(FResponse);
 
@@ -696,7 +702,7 @@ begin
     FOnHasNextFrame(Self);
 end;
 
-procedure THTTP2BackgroundInStreamTask.LaunchStream(const aDevice : String;
+procedure THTTP2BackgroundInStreamTask.LaunchStream(
   aOnHasNextFrame : TOnHasNextFrame);
 begin
   FOnHasNextFrame := aOnHasNextFrame;
@@ -706,7 +712,7 @@ begin
     if Assigned(FCurl) then
     begin
       FPath := '/output.raw?' +cSHASH+'='+HTTPEncode(FSettings.SID) +
-                                            '&'+cDEVICE+'='+HTTPEncode(aDevice);
+                                            '&'+cDEVICE+'='+HTTPEncode(FDevice);
 
       ConfigCURL(0, 0, METH_GET, false, false);
       curl_easy_setopt(FCURL, CURLOPT_TIMEOUT, Longint(-1));
@@ -833,27 +839,20 @@ begin
 end;
 
 constructor THTTP2BackgroundOutStreamTask.Create(aPool : THTTP2BackgroundTasks;
-  Settings : THTTP2SettingsIntf; aIsSilent : Boolean);
+  Settings : THTTP2SettingsIntf; const aSubProto : String; aDelta : integer;
+  aIsSilent : Boolean);
 begin
   inherited Create(aPool, Settings, aIsSilent);
   FFrames := TMemSeq.Create;
   FInc := 0;
+  FSubProtocol := aSubProto;
+  FDelta := aDelta;
 end;
 
 destructor THTTP2BackgroundOutStreamTask.Destroy;
 begin
   FFrames.Free;
   inherited Destroy;
-end;
-
-procedure THTTP2BackgroundOutStreamTask.SetSubProto(const aValue : String);
-begin
-  FSubProtocol := aValue;
-end;
-
-procedure THTTP2BackgroundOutStreamTask.SetDelta(aValue : integer);
-begin
-  FDelta := aValue;
 end;
 
 function THTTP2BackgroundOutStreamTask.Read(ptr : Pointer; size : LongWord;
@@ -2336,9 +2335,8 @@ begin
   begin
     Result := true;
 
-    Tsk := THTTP2BackgroundOutStreamTask.Create(FTaskPool.Tasks, FSetts, True);
-    Tsk.SetSubProto(aSubProto);
-    Tsk.SetDelta(aDelta);
+    Tsk := THTTP2BackgroundOutStreamTask.Create(FTaskPool.Tasks, FSetts,
+                                                aSubProto, aDelta, True);
     Tsk.OnFinish := @TaskFinished;
     Tsk.OnSuccess := @SuccessIOStream;
 
@@ -2361,14 +2359,15 @@ begin
   begin
     Result := true;
 
-    Tsk := THTTP2BackgroundInStreamTask.Create(FTaskPool.Tasks, FSetts, True);
+    Tsk := THTTP2BackgroundInStreamTask.Create(FTaskPool.Tasks, FSetts,
+                                                aDeviceName, True);
     Tsk.OnFinish := @TaskFinished;
     Tsk.OnSuccess := @SuccessIOStream;
 
     if Assigned(OnAfterLaunchInStream) then
       OnAfterLaunchInStream(Tsk);
 
-    Tsk.LaunchStream(aDeviceName, @OnHasNextFrame);
+    Tsk.LaunchStream(@OnHasNextFrame);
     FTaskPool.AddTask(Tsk);
   end;
 end;
