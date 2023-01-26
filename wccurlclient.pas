@@ -585,13 +585,11 @@ end;
 var W : Word;
     C : Cardinal;
     P : Int64;
-
-    ChunkPos : Integer;
 begin
   BP := 0;
   Lock;
   try
-    ChunkPos := 0;
+    Result := 0;
     while true do
     begin
       if BufferFreeSize = 0 then
@@ -600,13 +598,13 @@ begin
         Exit;
       end;
 
-      if ChunkPos < ChunkSz then
+      if Result < ChunkSz then
       begin
         FFrameBuffer.Position := FFrameBufferSize;
-        P := ChunkSz - ChunkPos;
+        P := ChunkSz - Result;
         if P > BufferFreeSize then P := BufferFreeSize;
-        FFrameBuffer.Write(Pointer(Chunk+ChunkPos)^, P);
-        Inc(ChunkPos, P);
+        FFrameBuffer.Write(Pointer(Chunk+Result)^, P);
+        Inc(Result, P);
         FFrameBufferSize := FFrameBuffer.Position;
       end;
 
@@ -638,7 +636,7 @@ begin
           end else
           begin
             TruncateFrameBuffer;
-            if ChunkPos = ChunkSz then
+            if Result >= ChunkSz then
               Exit;
           end;
         end;
@@ -651,8 +649,9 @@ begin
             FFrameState := fstWaitingStartOfFrame;
           end else
           begin
+            FFrameState := fstWaitingStartOfFrame;
             TruncateFrameBuffer;
-            if ChunkPos = ChunkSz then
+            if Result >= ChunkSz then
               Exit;
           end;
         end;
@@ -660,7 +659,6 @@ begin
     end;
   finally
     UnLock;
-    Result := ChunkPos;
   end;
 end;
 
@@ -696,7 +694,6 @@ begin
   if Finished then Exit(0);
 
   Result := TryConsumeFrame(ptr, size * nmemb);
-
 
   if (FFrames.Count > 0) and Assigned(FOnHasNextFrame) then
     FOnHasNextFrame(Self);
