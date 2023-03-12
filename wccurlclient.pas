@@ -895,9 +895,9 @@ begin
       FResponse.Size := 0;
       FPath := '/input.raw?' +cSHASH+'='+HTTPEncode(FSettings.SID);
       if Length(FSubProtocol) > 0 then
-         FPath := FPath + '&' + cSUBPROTO + HTTPEncode(FSubProtocol);
+         FPath := FPath + '&' + cSUBPROTO + '=' + HTTPEncode(FSubProtocol);
       if FDelta > 0 then
-         FPath := FPath + '&' + cDELTA + IntToStr(FDelta);
+         FPath := FPath + '&' + cDELTA + '=' + IntToStr(FDelta);
 
       ConfigCURL($500000000, -1, METH_UPLOAD, True, True);
 
@@ -932,7 +932,7 @@ end;
 constructor THTTP2AsyncBackground.Create;
 begin
   inherited Create(true);
-  FreeOnTerminate := true;
+  FreeOnTerminate := false;
   FTasks := THTTP2BackgroundTasks.Create;
 end;
 
@@ -2291,6 +2291,7 @@ begin
 
   FSetts.Free;
   FSynchroFinishedTasks.Free;
+  FTaskPool.Free;
   FFrame.Free;
   FUpdates.ExtractAll;
   FUpdates.Free;
@@ -2453,6 +2454,8 @@ begin
   finally
     UnLock;
   end;
+
+  SynchroFinishTasks;
 
   if Assigned(OnDisconnect) then
     OnDisconnect(Self);
