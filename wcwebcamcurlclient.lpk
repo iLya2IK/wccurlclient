@@ -22,6 +22,10 @@
         <Filename Value="wcwebcamconsts.pas"/>
         <UnitName Value="wcwebcamconsts"/>
       </Item>
+      <Item>
+        <Filename Value="wccurlclientcontrols.pas"/>
+        <UnitName Value="WCCurlClientControls"/>
+      </Item>
     </Files>
     <RequiredPkgs>
       <Item>

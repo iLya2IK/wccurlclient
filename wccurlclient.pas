@@ -219,6 +219,7 @@ type
     procedure TerminateTask(aStrm : TObject);
     function IsTaskFinished(aStrm : TObject; {%H-}data : pointer) : Boolean;
     procedure SetTaskFinished(aStrm : TObject; data : pointer);
+    procedure SetStreamFinished(aStrm : TObject);
     procedure SetMultiPollError(aStrm : TObject; data : pointer);
     procedure AfterTaskExtract(aStrm: TObject);
     procedure DoMultiError(code : integer);
@@ -229,6 +230,7 @@ type
     property  CURLMv : TThreadsafeCURLM read FCURLM;
     procedure DoIdle;
     procedure Terminate;
+    procedure CloseStreaming;
 
     function Ready : Boolean;
 
@@ -387,6 +389,7 @@ type
     procedure SendMsg(aMsg : TJSONObject);
     procedure RequestRecord(rid : integer);
     procedure SaveAsSnapshot(Buf : Pointer;  Sz : Int64);
+    procedure StopStreaming;
 
     property Log : TThreadStringList read FLog;
 
@@ -1559,6 +1562,15 @@ begin
   end;
 end;
 
+procedure THTTP2BackgroundTasks.SetStreamFinished(aStrm : TObject);
+begin
+  if (aStrm is THTTP2BackgroundInStreamTask) or
+     (aStrm is THTTP2BackgroundOutStreamTask) then
+  begin
+    THTTP2BackgroundTask(aStrm).Terminate;
+  end;
+end;
+
 procedure THTTP2BackgroundTasks.SetMultiPollError(aStrm : TObject;
   data : pointer);
 begin
@@ -1662,6 +1674,11 @@ end;
 procedure THTTP2BackgroundTasks.Terminate;
 begin
   DoForAll(@TerminateTask);
+end;
+
+procedure THTTP2BackgroundTasks.CloseStreaming;
+begin
+  DoForAll(@SetStreamFinished);
 end;
 
 function THTTP2BackgroundTasks.Ready : Boolean;
@@ -2002,7 +2019,14 @@ begin
   ATask.Lock;
   try
     if ATask is THTTP2BackgroundOutStreamTask then
-      IsStreaming := false;
+    begin
+      Lock;
+      try
+        FStreaming := false;
+      finally
+        Unlock;
+      end;
+    end;
   finally
     ATask.UnLock;
   end;
@@ -2221,7 +2245,10 @@ procedure TWCCURLClient.SetStreaming(AValue : Boolean);
 begin
   Lock;
   try
-    FStreaming := AValue;
+    if FStreaming <> AValue then
+    begin
+      if not AValue then StopStreaming;
+    end;
   finally
     UnLock;
   end;
@@ -2343,7 +2370,12 @@ begin
 
     Tsk.LaunchStream(@OnGetNextFrame);
     FTaskPool.AddTask(Tsk);
-    IsStreaming := true;
+    Lock;
+    try
+      FStreaming := true;
+    finally
+      UnLock;
+    end;
   end;
 end;
 
@@ -2566,6 +2598,14 @@ end;
 procedure TWCCURLClient.SaveAsSnapshot(Buf : Pointer; Sz : Int64);
 begin
   doPost('/addRecord.json?'+cSHASH+'='+HTTPEncode(SID), Buf, Sz, @SuccessSaveAsSnapshot, false);
+end;
+
+procedure TWCCURLClient.StopStreaming;
+begin
+  if IsStreaming then
+  begin
+    FTaskPool.Tasks.CloseStreaming;
+  end;
 end;
 
 end.

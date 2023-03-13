@@ -8,7 +8,7 @@ unit wcwebcamcurlclient;
 interface
 
 uses
-  wccurlclient, wcwebcamconsts, LazarusPackageIntf;
+  wccurlclient, wcwebcamconsts, WCCurlClientControls, LazarusPackageIntf;
 
 implementation
 
