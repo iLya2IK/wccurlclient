@@ -275,6 +275,9 @@ type
     property FrameID : integer read GetFrameID;
   end;
 
+  TWCCURLClientStreamingValue = (cstrOut, cstrIn);
+  TWCCURLClientStreaming = set of TWCCURLClientStreamingValue;
+
   { TWCCURLClient }
 
   TWCCURLClient = class(TThreadSafeObject)
@@ -317,8 +320,8 @@ type
     FNeedToUpdateDevices,
     FNeedToUpdateRecords,
     FNeedToUpdateMsgs,
-    FNeedToUpdateStreams,
-    FStreaming : Boolean;
+    FNeedToUpdateStreams : Boolean;
+    FStreaming : TWCCURLClientStreaming;
     FOnSuccessIOStream : TTaskNotify;
     FOnSynchroUpdateTask : TTaskNotify;
     FOnSuccessUpdateRecords : TCURLArrNotifyEvent;
@@ -349,6 +352,7 @@ type
     function GetProxy : String;
     function GetSID : String;
     function GetStreaming : Boolean;
+    function GetStreamingValues : TWCCURLClientStreaming;
     function GetVerifyTSL : Boolean;
     procedure SetNeedToUpdateDevices(AValue : Boolean);
     procedure SetNeedToUpdateMsgs(AValue : Boolean);
@@ -420,6 +424,7 @@ type
 
     property Connected : Boolean read GetConnected write SetConnected;
     property IsStreaming : Boolean read GetStreaming write SetStreaming;
+    property Streaming : TWCCURLClientStreaming read GetStreamingValues;
     property NeedToUpdateDevices : Boolean read GetNeedToUpdateDevices write SetNeedToUpdateDevices;
     property NeedToUpdateRecords : Boolean read GetNeedToUpdateRecords write SetNeedToUpdateRecords;
     property NeedToUpdateMsgs : Boolean read GetNeedToUpdateMsgs write SetNeedToUpdateMsgs;
@@ -2022,7 +2027,16 @@ begin
     begin
       Lock;
       try
-        FStreaming := false;
+        FStreaming := FStreaming - [cstrOut];
+      finally
+        Unlock;
+      end;
+    end else
+    if ATask is THTTP2BackgroundInStreamTask then
+    begin
+      Lock;
+      try
+        FStreaming := FStreaming - [cstrIn];
       finally
         Unlock;
       end;
@@ -2178,6 +2192,16 @@ function TWCCURLClient.GetStreaming : Boolean;
 begin
   Lock;
   try
+    Result := FStreaming <> [];
+  finally
+    UnLock;
+  end;
+end;
+
+function TWCCURLClient.GetStreamingValues : TWCCURLClientStreaming;
+begin
+  Lock;
+  try
     Result := FStreaming;
   finally
     UnLock;
@@ -2245,7 +2269,7 @@ procedure TWCCURLClient.SetStreaming(AValue : Boolean);
 begin
   Lock;
   try
-    if FStreaming <> AValue then
+    if IsStreaming then
     begin
       if not AValue then StopStreaming;
     end;
@@ -2269,7 +2293,7 @@ begin
   FUpdates := THTTP2StreamsTasks.Create;
 
   FFrame := THTTP2StreamFrame.Create;
-  FStreaming := false;
+  FStreaming := [];
 
   FSetts := THTTP2SettingsIntf.Create;
 
@@ -2372,7 +2396,7 @@ begin
     FTaskPool.AddTask(Tsk);
     Lock;
     try
-      FStreaming := true;
+      FStreaming := FStreaming + [cstrOut];
     finally
       UnLock;
     end;
@@ -2399,6 +2423,12 @@ begin
 
     Tsk.LaunchStream(@OnHasNextFrame);
     FTaskPool.AddTask(Tsk);
+    Lock;
+    try
+      FStreaming := FStreaming + [cstrIn];
+    finally
+      UnLock;
+    end;
   end;
 end;
 

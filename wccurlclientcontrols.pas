@@ -6,7 +6,7 @@ interface
 
 uses
   Classes, SysUtils, Controls, Graphics, ValEdit,
-  ComCtrls, StdCtrls, wccurlclient,
+  ComCtrls, StdCtrls, wccurlclient, Grids,
   JSONPropStorage;
 
 type
@@ -86,6 +86,9 @@ type
     procedure SetProxy(AValue : String);
     procedure SetSID(AValue : String);
     procedure SetUserName(AValue : String);
+
+    procedure ValuesDrawCell(Sender : TObject; aCol, aRow : Integer;
+          aRect : TRect; aState : TGridDrawState);
 
     procedure OptsEditingDone(Sender : TObject);
     procedure VerifyTSLCBChange(Sender : TObject);
@@ -220,6 +223,58 @@ begin
   FValues.Cells[1, TWCClientPropStorage.USER_POS] := AValue;
 end;
 
+procedure TWCClientConfigEditor.ValuesDrawCell(Sender : TObject; aCol,
+  aRow : Integer; aRect : TRect; aState : TGridDrawState);
+var
+  pen : TPen;
+  br  : TBrush;
+  fnt : TFont;
+  ts : TTextStyle;
+  S  : String;
+
+  SG : TValueListEditor;
+begin
+  SG := TValueListEditor(Sender);
+  S := SG.Cells[aCol, aRow];
+  if (aCol = 1) and (aRow = TWCClientPropStorage.PWRD_POS) then
+    if Length(S) > 0 then
+      S := '****';
+
+  pen := SG.Canvas.Pen;
+  br  := SG.Canvas.Brush;
+  fnt := SG.Canvas.Font;
+
+  ts := SG.Canvas.TextStyle;
+  ts.Alignment := taLeftJustify;
+  ts.Layout := tlCenter;
+  ts.Wordbreak := True;
+  ts.SingleLine := True;
+  ts.Opaque := false;
+
+  if aCol = 0 then
+  begin
+    br.Color := clBtnFace;
+    Pen.Style := psClear;
+    fnt.Color := clBtnText;
+  end else
+  begin
+    br.Color := clWindow;
+    if gdFixed in aState then br.Color := $DDDDDD;
+    Pen.Style := psClear;
+    fnt.Color := clWindowText;
+    if gdSelected in aState then
+    begin
+      br.Color  := clHighlight;
+      fnt.Color := clHighlightText;
+      pen.Color := clHighlightText;
+      pen.Style := psDot;
+    end;
+  end;
+  SG.Canvas.Rectangle(aRect);
+  fnt.Style := [];
+  SG.Canvas.TextRect(aRect, aRect.Left + 2, aRect.Top + 2, S, ts);
+end;
+
 procedure TWCClientConfigEditor.SetProps(AValue : TWCClientPropStorage);
 begin
   if FProps = AValue then Exit;
@@ -258,6 +313,7 @@ begin
   FValues.Strings.AddPair(csSID, '');
   FValues.DisplayOptions := [doAutoColResize, doKeyColFixed];
   FValues.OnEditingDone := @OptsEditingDone;
+  FValues.OnDrawCell := @ValuesDrawCell;
   FValues.Align := alClient;
 
   FVerifyTLS := TCheckBox.Create(Self);
